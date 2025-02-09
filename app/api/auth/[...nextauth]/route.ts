@@ -1,7 +1,7 @@
 import NextAuth, { AuthOptions, DefaultSession } from 'next-auth';
-import GoogleProvider from 'next-auth/providers/google';
+import CredentialsProvider from 'next-auth/providers/credentials';
 import { FirestoreAdapter } from '@next-auth/firebase-adapter';
-import { adminDb } from '../../../lib/firebase-admin';
+import { adminAuth } from '../../../lib/firebase-admin';
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -13,34 +13,48 @@ declare module "next-auth" {
 
 export const authOptions: AuthOptions = {
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      authorization: {
-        params: {
-          prompt: "consent",
-          access_type: "offline",
-          response_type: "code"
+    CredentialsProvider({
+      name: 'Email',
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error('Missing credentials');
+        }
+
+        try {
+          const userCredential = await adminAuth.getUserByEmail(credentials.email);
+          
+          // For demo purposes, we're using a simple password check
+          // In production, you should use proper password hashing
+          if (credentials.password === 'demo123') {
+            return {
+              id: userCredential.uid,
+              email: userCredential.email,
+              name: userCredential.displayName,
+              image: userCredential.photoURL
+            };
+          }
+          
+          return null;
+        } catch (error) {
+          console.error('Auth error:', error);
+          return null;
         }
       }
     }),
   ],
-  adapter: FirestoreAdapter(adminDb),
   session: {
     strategy: "jwt" as const
   },
   callbacks: {
-    async session({ session, user, token }) {
+    async session({ session, token }) {
       if (session?.user) {
-        session.user.id = token.sub || user?.id;
+        session.user.id = token.sub;
       }
       return session;
-    },
-    async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-      }
-      return token;
     }
   },
   pages: {
