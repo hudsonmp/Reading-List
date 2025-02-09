@@ -28,6 +28,10 @@ yarn-error.log*
 .env.development
 .env.test
 .env.production
+.env.development.local
+.env.test.local
+.env.production.local
+.env.backup
 
 # vercel
 .vercel
@@ -37,13 +41,31 @@ yarn-error.log*
 next-env.d.ts
 
 # firebase
-service-account.json
-firebase-debug.log
+service-account*.json
+firebase-debug*.log
+*firebase*.json
+.firebase/
 
 # IDE
 .vscode/
 .idea/
+*.sublime-workspace
+*.sublime-project
 
-# secrets
+# secrets and credentials
 **/secrets.*
 **/credentials.*
+**/*.key
+**/*.pem
+**/*.cert
+**/*secret*
+**/*credential*
+**/*password*
+**/*api_key*
+**/*apikey*
+**/*token*
+
+# backup files
+*.bak
+*.backup
+*~

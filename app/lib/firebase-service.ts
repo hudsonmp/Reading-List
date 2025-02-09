@@ -8,6 +8,11 @@ import {
   query,
   where,
   getDocs,
+  orderBy,
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData
 } from 'firebase/firestore';
 
 export interface ReadingItem {
@@ -43,6 +48,44 @@ export interface ReadingItem {
 }
 
 const COLLECTION_NAME = 'reading-items';
+const ITEMS_PER_PAGE = 10;
+
+export async function getUserItems(
+  userId: string,
+  lastDoc?: QueryDocumentSnapshot<DocumentData>
+): Promise<{ items: ReadingItem[]; lastDoc: QueryDocumentSnapshot<DocumentData> | null }> {
+  try {
+    let q = query(
+      collection(db, COLLECTION_NAME),
+      where('userId', '==', userId),
+      orderBy('dateAdded', 'desc'),
+      limit(ITEMS_PER_PAGE)
+    );
+
+    if (lastDoc) {
+      q = query(
+        collection(db, COLLECTION_NAME),
+        where('userId', '==', userId),
+        orderBy('dateAdded', 'desc'),
+        startAfter(lastDoc),
+        limit(ITEMS_PER_PAGE)
+      );
+    }
+
+    const querySnapshot = await getDocs(q);
+    const lastVisible = querySnapshot.docs[querySnapshot.docs.length - 1] || null;
+
+    const items = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as ReadingItem));
+
+    return { items, lastDoc: lastVisible };
+  } catch (error) {
+    console.error('Error getting user items:', error);
+    throw error;
+  }
+}
 
 export async function addItem(item: Omit<ReadingItem, 'id'>): Promise<ReadingItem> {
   try {
@@ -70,20 +113,6 @@ export async function deleteItem(id: string): Promise<void> {
     await deleteDoc(docRef);
   } catch (error) {
     console.error('Error deleting item:', error);
-    throw error;
-  }
-}
-
-export async function getUserItems(userId: string): Promise<ReadingItem[]> {
-  try {
-    const q = query(collection(db, COLLECTION_NAME), where('userId', '==', userId));
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as ReadingItem));
-  } catch (error) {
-    console.error('Error getting user items:', error);
     throw error;
   }
 } 

@@ -1,10 +1,25 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ReadingItem } from './firebase-service';
+import { getSecrets } from './secrets-manager';
 
-const anthropic = new Anthropic({
-  apiKey: process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY || '',
-  dangerouslyAllowBrowser: true
-});
+let anthropicClient: Anthropic | null = null;
+
+async function getAnthropicClient(): Promise<Anthropic | null> {
+  if (anthropicClient) return anthropicClient;
+
+  const secrets = await getSecrets();
+  if (!secrets?.anthropicApiKey) {
+    console.error('Anthropic API key not found in secrets');
+    return null;
+  }
+
+  anthropicClient = new Anthropic({
+    apiKey: secrets.anthropicApiKey,
+    dangerouslyAllowBrowser: true
+  });
+
+  return anthropicClient;
+}
 
 interface AIAnalysisResult {
   description: string;
@@ -14,46 +29,84 @@ interface AIAnalysisResult {
   aiAnalysis: ReadingItem['aiAnalysis'];
 }
 
+// Helper function to validate URLs
+async function validateUrl(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Helper function to search for related content using Google Custom Search API
+async function searchRelatedContent(
+  query: string, 
+  type: 'article' | 'video' = 'article',
+  secrets: { googleApiKey: string; googleSearchEngineId: string }
+): Promise<any[]> {
+  try {
+    const searchType = type === 'video' ? '&videoSyndicated=true&type=video' : '';
+    const response = await fetch(
+      `https://www.googleapis.com/customsearch/v1?key=${secrets.googleApiKey}&cx=${secrets.googleSearchEngineId}${searchType}&q=${encodeURIComponent(query)}`
+    );
+    const data = await response.json();
+    return data.items || [];
+  } catch (error) {
+    console.error('Error searching related content:', error);
+    return [];
+  }
+}
+
 export async function analyzeContent(title: string, url?: string): Promise<AIAnalysisResult> {
   try {
+    const anthropic = await getAnthropicClient();
+    if (!anthropic) {
+      throw new Error('Failed to initialize Anthropic client');
+    }
+
     let content = `Title: ${title}`;
     if (url) {
       content += `\nURL: ${url}`;
+      
+      // Validate the URL
+      const isValidUrl = await validateUrl(url);
+      if (!isValidUrl) {
+        console.warn('Invalid or inaccessible URL provided');
+      }
     }
 
+    // First, get AI analysis
     const message = await anthropic.messages.create({
       model: "claude-3-haiku-20240307",
-      max_tokens: 1000,
-      temperature: 0.5,
-      system: `You are a specialized JSON generator that analyzes content. Always respond with valid, parseable JSON only. No other text or explanations.`,
+      max_tokens: 1500,
+      temperature: 0.7,
+      system: `You are a specialized content analyzer that provides comprehensive analysis. Focus on extracting key insights, providing detailed summaries, and identifying core concepts. Always format responses as valid JSON.`,
       messages: [
         {
           role: "user",
-          content: `Analyze this content and respond with a JSON object containing:
+          content: `Analyze this content and provide a detailed response with:
+- A thorough multi-paragraph description
+- A comprehensive summary covering main points
+- 3-5 key insights
+- Difficulty assessment with reasoning
+- Estimated time to consume with explanation
+- Relevant topic tags
+- Target audience
+
+Format as JSON:
 {
-  "description": "2-3 sentence description",
-  "summary": "1 sentence summary",
-  "suggestedReadings": [
-    {
-      "title": "string",
-      "url": "string (optional)",
-      "reason": "1 sentence reason"
-    }
-  ],
-  "relatedVideos": [
-    {
-      "title": "string",
-      "url": "string",
-      "platform": "youtube",
-      "thumbnail": "string (optional)"
-    }
-  ],
+  "description": "string (2-3 paragraphs)",
+  "summary": "string (comprehensive, 3-4 sentences)",
   "aiAnalysis": {
-    "keyPoints": ["3-5 key points"],
+    "keyPoints": ["string"],
     "difficulty": "beginner|intermediate|advanced",
-    "timeToConsume": "estimated time (e.g., '10 minutes')",
-    "tags": ["3-5 relevant tags"],
-    "lastAnalyzed": "current_timestamp"
+    "difficultyReasoning": "string",
+    "timeToConsume": "string",
+    "timeExplanation": "string",
+    "tags": ["string"],
+    "targetAudience": "string",
+    "lastAnalyzed": "string"
   }
 }
 
@@ -62,42 +115,73 @@ Content to analyze: ${content}`
       ]
     });
 
-    // Access the content safely and ensure it's valid JSON
     let messageContent = '';
     if (message.content[0].type === 'text') {
-      // Remove any potential markdown code block markers
       messageContent = message.content[0].text.replace(/```json\n?|\n?```/g, '').trim();
     }
 
-    try {
-      const result = JSON.parse(messageContent);
+    const aiResult = JSON.parse(messageContent);
+
+    // Get secrets for Google API
+    const secrets = await getSecrets();
+    if (!secrets?.googleApiKey || !secrets?.googleSearchEngineId) {
+      console.warn('Google API credentials not found in secrets');
       return {
-        ...result,
-        aiAnalysis: {
-          ...result.aiAnalysis,
-          lastAnalyzed: new Date().toISOString(),
-        },
-      };
-    } catch (parseError) {
-      console.error('Failed to parse AI response:', messageContent);
-      // Return a minimal valid response
-      return {
-        description: title,
-        summary: title,
+        description: aiResult.description,
+        summary: aiResult.summary,
         suggestedReadings: [],
         relatedVideos: [],
         aiAnalysis: {
-          keyPoints: [],
-          difficulty: 'beginner',
-          timeToConsume: '5 minutes',
-          tags: [],
+          ...aiResult.aiAnalysis,
           lastAnalyzed: new Date().toISOString(),
         },
       };
     }
+
+    // Next, search for related content using secrets
+    const searchResults = await searchRelatedContent(title, 'article', secrets);
+    const videoResults = await searchRelatedContent(title, 'video', secrets);
+
+    // Format suggested readings from search results
+    const suggestedReadings = searchResults.slice(0, 3).map(item => ({
+      title: item.title,
+      url: item.link,
+      reason: `This ${item.pagemap?.metatags?.[0]?.['og:type'] || 'content'} appears relevant because it covers similar topics and comes from ${item.displayLink}`,
+    }));
+
+    // Format related videos from video search
+    const relatedVideos = videoResults.slice(0, 2).map(item => ({
+      title: item.title,
+      url: item.link,
+      platform: 'youtube',
+      thumbnail: item.pagemap?.videoobject?.[0]?.thumbnailurl || item.pagemap?.cse_thumbnail?.[0]?.src,
+    }));
+
+    return {
+      description: aiResult.description,
+      summary: aiResult.summary,
+      suggestedReadings,
+      relatedVideos,
+      aiAnalysis: {
+        ...aiResult.aiAnalysis,
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
   } catch (error) {
     console.error('Error analyzing content:', error);
-    throw error;
+    return {
+      description: `Analysis of: ${title}`,
+      summary: title,
+      suggestedReadings: [],
+      relatedVideos: [],
+      aiAnalysis: {
+        keyPoints: [],
+        difficulty: 'beginner',
+        timeToConsume: '5 minutes',
+        tags: [],
+        lastAnalyzed: new Date().toISOString(),
+      },
+    };
   }
 }
 
@@ -113,43 +197,58 @@ export async function getYouTubeInfo(url: string) {
 
 export async function generateSuggestions(items: ReadingItem[]) {
   try {
+    // Extract key information from existing items
+    const topics = items.flatMap(item => item.aiAnalysis?.tags || []);
+    const topicSummary = [...new Set(topics)].join(', ');
+
     const message = await anthropic.messages.create({
       model: "claude-3-haiku-20240307",
-      max_tokens: 500,
-      temperature: 0.5,
-      system: `You are a specialized JSON generator that suggests related content. Always respond with valid, parseable JSON only. No other text or explanations.`,
+      max_tokens: 1000,
+      temperature: 0.7,
+      system: `You are a specialized recommendation engine that suggests high-quality content based on user interests. Focus on current, authoritative sources.`,
       messages: [
         {
           role: "user",
-          content: `Based on these items, generate an array of 3 suggested readings. Respond with JSON array only:
+          content: `Based on these topics: ${topicSummary}
+Generate 3 highly relevant content suggestions. For each suggestion:
+- Ensure it's from a reputable source
+- Provide clear reasoning for the recommendation
+- Match the user's apparent expertise level
+
+Format as JSON array:
 [
   {
-    "title": "string",
-    "url": "string (optional)",
-    "reason": "1 sentence reason"
+    "title": "string (specific title)",
+    "type": "article|book|video|website",
+    "reason": "string (1-2 sentences explaining relevance)"
   }
-]
-
-Items: ${JSON.stringify(items)}`
+]`
         }
       ]
     });
 
-    // Access the content safely and ensure it's valid JSON
     let messageContent = '';
     if (message.content[0].type === 'text') {
-      // Remove any potential markdown code block markers
       messageContent = message.content[0].text.replace(/```json\n?|\n?```/g, '').trim();
     }
 
-    try {
-      return JSON.parse(messageContent);
-    } catch (parseError) {
-      console.error('Failed to parse AI suggestions:', messageContent);
-      return [];
-    }
+    const suggestions = JSON.parse(messageContent);
+
+    // Enhance suggestions with real URLs
+    const enhancedSuggestions = await Promise.all(
+      suggestions.map(async (suggestion: any) => {
+        const searchResults = await searchRelatedContent(suggestion.title);
+        const bestMatch = searchResults[0];
+        return {
+          ...suggestion,
+          url: bestMatch?.link || undefined,
+        };
+      })
+    );
+
+    return enhancedSuggestions;
   } catch (error) {
     console.error('Error generating suggestions:', error);
-    throw error;
+    return [];
   }
 } 

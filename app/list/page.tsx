@@ -8,14 +8,27 @@ import { useReadingList } from '../../hooks/useReadingList';
 import { LoadingSpinner } from '../../components/shared/LoadingSpinner';
 import { ReadingItemDetail } from '../../components/ReadingItemDetail';
 import type { ReadingItem } from '../lib/firebase-service';
+import { useInView } from 'react-intersection-observer';
 
 export default function ListPage() {
   const router = useRouter();
   const { data: session } = useSession();
-  const { items, loading, toggleComplete, deleteItem } = useReadingList();
+  const { items, loading, hasMore, loadMore, toggleComplete, deleteItem } = useReadingList();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [filter, setFilter] = React.useState('all');
   const [selectedItem, setSelectedItem] = React.useState<ReadingItem | null>(null);
+
+  // Set up intersection observer for infinite scroll
+  const { ref, inView } = useInView({
+    threshold: 0,
+  });
+
+  // Load more items when the last item comes into view
+  React.useEffect(() => {
+    if (inView && hasMore && !loading) {
+      loadMore();
+    }
+  }, [inView, hasMore, loading, loadMore]);
 
   const getIcon = (type: string) => {
     switch (type) {
@@ -54,7 +67,7 @@ export default function ListPage() {
   return (
     <main className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm">
+      <div className="bg-white shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center">
@@ -98,22 +111,20 @@ export default function ListPage() {
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        {loading ? (
-          <LoadingSpinner />
-        ) : (
-          <div className="grid gap-6">
-            {filteredItems.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-gray-500">No items in your reading list yet.</p>
-                <button
-                  onClick={() => router.push('/add')}
-                  className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
-                >
-                  Add your first item
-                </button>
-              </div>
-            ) : (
-              filteredItems.map((item) => (
+        <div className="grid gap-6">
+          {filteredItems.length === 0 && !loading ? (
+            <div className="text-center py-12">
+              <p className="text-gray-500">No items in your reading list yet.</p>
+              <button
+                onClick={() => router.push('/add')}
+                className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
+              >
+                Add your first item
+              </button>
+            </div>
+          ) : (
+            <>
+              {filteredItems.map((item, index) => (
                 <div
                   key={item.id}
                   className={`bg-white rounded-lg shadow-sm p-6 hover:shadow-md transition-shadow ${
@@ -175,10 +186,18 @@ export default function ListPage() {
                     </div>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        )}
+              ))}
+
+              {/* Loading indicator */}
+              {loading && <LoadingSpinner />}
+
+              {/* Infinite scroll trigger */}
+              {hasMore && !loading && (
+                <div ref={ref} className="h-10" />
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Detail Modal */}
