@@ -2,10 +2,12 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { Book, Globe, FileText, Bookmark, ArrowLeft, Search, Trash2, Check } from 'lucide-react';
+import { Book, Globe, FileText, Bookmark, ArrowLeft, Search, Trash2, Check, Youtube, Eye } from 'lucide-react';
 import { useSession } from 'next-auth/react';
-import { useReadingList } from '@/hooks/useReadingList';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { useReadingList } from '../../hooks/useReadingList';
+import { LoadingSpinner } from '../../components/shared/LoadingSpinner';
+import { ReadingItemDetail } from '../../components/ReadingItemDetail';
+import type { ReadingItem } from '../lib/firebase-service';
 
 export default function ListPage() {
   const router = useRouter();
@@ -13,6 +15,7 @@ export default function ListPage() {
   const { items, loading, toggleComplete, deleteItem } = useReadingList();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [filter, setFilter] = React.useState('all');
+  const [selectedItem, setSelectedItem] = React.useState<ReadingItem | null>(null);
 
   const getIcon = (type: string) => {
     switch (type) {
@@ -20,6 +23,7 @@ export default function ListPage() {
       case 'website': return <Globe className="w-5 h-5" />;
       case 'article': return <FileText className="w-5 h-5" />;
       case 'report': return <Bookmark className="w-5 h-5" />;
+      case 'video': return <Youtube className="w-5 h-5" />;
       default: return <Book className="w-5 h-5" />;
     }
   };
@@ -85,6 +89,7 @@ export default function ListPage() {
                 <option value="website">Websites</option>
                 <option value="article">Articles</option>
                 <option value="report">Reports</option>
+                <option value="video">Videos</option>
               </select>
             </div>
           </div>
@@ -152,12 +157,22 @@ export default function ListPage() {
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => item.id && deleteItem(item.id)}
-                      className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSelectedItem(item)}
+                        className="p-2 text-gray-400 hover:text-blue-500 transition-colors"
+                        title="View Details"
+                      >
+                        <Eye className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => item.id && deleteItem(item.id)}
+                        className="p-2 text-gray-400 hover:text-red-500 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -165,6 +180,14 @@ export default function ListPage() {
           </div>
         )}
       </div>
+
+      {/* Detail Modal */}
+      {selectedItem && (
+        <ReadingItemDetail
+          item={selectedItem}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
     </main>
   );
 } 

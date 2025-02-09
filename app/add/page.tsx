@@ -2,15 +2,30 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { Book, Globe, FileText, Bookmark, ArrowLeft } from 'lucide-react';
+import { Book, Globe, FileText, Bookmark, ArrowLeft, Youtube } from 'lucide-react';
 import { useSession } from 'next-auth/react';
-import { useReadingList } from '@/hooks/useReadingList';
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { useReadingList } from '../../hooks/useReadingList';
+import { LoadingSpinner } from '../../components/shared/LoadingSpinner';
+import { analyzeContent, getYouTubeInfo } from '../../app/lib/openai-service';
+
+declare module "next-auth" {
+  interface Session {
+    user?: {
+      id?: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    }
+  }
+}
 
 export default function AddPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const { addItem } = useReadingList();
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isAnalyzing, setIsAnalyzing] = React.useState(false);
+  const [error, setError] = React.useState('');
   const [formData, setFormData] = React.useState({
     title: '',
     url: '',
@@ -20,9 +35,47 @@ export default function AddPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = await addItem(formData);
-    if (result) {
-      router.push('/list');
+    if (!session?.user?.id) {
+      setError('Please sign in to add items to your reading list');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setIsAnalyzing(true);
+    setError('');
+
+    try {
+      // First, analyze the content using AI
+      const aiResult = await analyzeContent(formData.title, formData.url);
+      
+      // If it's a YouTube video, get additional info
+      let videoInfo = {};
+      if (formData.type === 'video' && formData.url) {
+        videoInfo = await getYouTubeInfo(formData.url);
+      }
+
+      // Add the item with AI-enhanced data
+      const result = await addItem({
+        ...formData,
+        ...videoInfo,
+        description: aiResult.description,
+        summary: aiResult.summary,
+        suggestedReadings: aiResult.suggestedReadings,
+        relatedVideos: aiResult.relatedVideos,
+        aiAnalysis: aiResult.aiAnalysis,
+      });
+
+      if (result) {
+        router.push('/list');
+      } else {
+        setError('Failed to add item to reading list');
+      }
+    } catch (error) {
+      console.error('Error adding item:', error);
+      setError('An error occurred while adding the item');
+    } finally {
+      setIsSubmitting(false);
+      setIsAnalyzing(false);
     }
   };
 
@@ -30,7 +83,8 @@ export default function AddPage() {
     book: <Book className="w-6 h-6" />,
     website: <Globe className="w-6 h-6" />,
     article: <FileText className="w-6 h-6" />,
-    report: <Bookmark className="w-6 h-6" />
+    report: <Bookmark className="w-6 h-6" />,
+    video: <Youtube className="w-6 h-6" />
   };
 
   if (!session) {
@@ -52,6 +106,12 @@ export default function AddPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm p-6 space-y-6">
+          {error && (
+            <div className="text-red-500 text-sm text-center">
+              {error}
+            </div>
+          )}
+          
           {/* Title Input */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -84,7 +144,7 @@ export default function AddPage() {
             <label className="block text-sm font-medium text-gray-700 mb-4">
               Type
             </label>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
               {Object.entries(typeIcons).map(([type, icon]) => (
                 <button
                   key={type}
@@ -126,9 +186,10 @@ export default function AddPage() {
           <div className="pt-4">
             <button
               type="submit"
-              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              disabled={isSubmitting}
+              className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Add to List
+              {isAnalyzing ? 'Analyzing Content...' : isSubmitting ? 'Adding...' : 'Add to List'}
             </button>
           </div>
         </form>

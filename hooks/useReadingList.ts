@@ -1,7 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
-import { addItem, updateItem, deleteItem, getUserItems } from '@/lib/firebase-service';
-import type { ReadingItem } from '@/lib/firebase-service';
+import { addItem, updateItem, deleteItem, getUserItems } from '../app/lib/firebase-service';
+import type { ReadingItem } from '../app/lib/firebase-service';
+
+declare module "next-auth" {
+  interface Session {
+    user?: {
+      id?: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    }
+  }
+}
 
 export function useReadingList() {
   const { data: session } = useSession();
@@ -22,11 +33,18 @@ export function useReadingList() {
       }
     };
 
-    fetchItems();
+    if (session?.user?.id) {
+      fetchItems();
+    } else {
+      setLoading(false);
+    }
   }, [session?.user?.id]);
 
   const handleAddItem = async (newItem: Omit<ReadingItem, 'id' | 'userId' | 'dateAdded' | 'completed'>) => {
-    if (!session?.user?.id) return null;
+    if (!session?.user?.id) {
+      console.error('No user ID found in session');
+      return null;
+    }
     
     const itemToAdd = {
       ...newItem,
