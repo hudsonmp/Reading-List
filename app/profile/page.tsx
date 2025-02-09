@@ -1,14 +1,50 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSession, signIn, signOut } from 'next-auth/react';
-import { ArrowLeft, LogOut, User } from 'lucide-react';
+import { ArrowLeft, LogOut, User, Home } from 'lucide-react';
 import Image from 'next/image';
+import { auth } from '../lib/firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 
 export default function ProfilePage() {
   const router = useRouter();
   const { data: session, status } = useSession();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isSignIn, setIsSignIn] = useState(true);
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    try {
+      if (isSignIn) {
+        const result = await signIn('credentials', {
+          email,
+          password,
+          redirect: false,
+        });
+
+        if (result?.error) {
+          setError('Invalid email or password');
+        }
+      } else {
+        // Create account using Firebase
+        await createUserWithEmailAndPassword(auth, email, password);
+        // After successful account creation, sign in
+        await signIn('credentials', {
+          email,
+          password,
+          redirect: false,
+        });
+      }
+    } catch (error: any) {
+      setError(error.message || 'An error occurred');
+    }
+  };
 
   if (status === 'loading') {
     return (
@@ -50,13 +86,20 @@ export default function ProfilePage() {
                   </div>
                 )}
                 <h2 className="mt-4 text-xl font-medium text-gray-900">
-                  {session.user?.name}
+                  {session.user?.name || session.user?.email}
                 </h2>
                 <p className="text-gray-500">{session.user?.email}</p>
               </div>
 
               {/* Actions */}
-              <div className="p-6">
+              <div className="p-6 space-y-3">
+                <button
+                  onClick={() => router.push('/')}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <Home className="w-5 h-5" />
+                  Return to Home
+                </button>
                 <button
                   onClick={() => signOut()}
                   className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
@@ -67,19 +110,23 @@ export default function ProfilePage() {
               </div>
             </>
           ) : (
-            <div className="p-8 text-center">
+            <div className="p-8">
               <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
                 <User className="w-10 h-10 text-blue-600" />
               </div>
-              <h2 className="mt-4 text-xl font-medium text-gray-900">
-                Sign in to Reading List
+              <h2 className="mt-4 text-xl font-medium text-gray-900 text-center">
+                {isSignIn ? 'Sign in to Reading List' : 'Create an Account'}
               </h2>
-              <p className="mt-2 text-gray-500">
-                Save your reading list across devices
+              <p className="mt-2 text-gray-500 text-center">
+                {isSignIn 
+                  ? 'Save your reading list across devices'
+                  : 'Join Reading List to start saving your favorite reads'}
               </p>
-              <div className="mt-6 space-y-4">
+
+              {/* Google Sign In Button */}
+              <div className="mt-6">
                 <button
-                  onClick={() => signIn('google')}
+                  onClick={() => signIn('google', { callbackUrl: '/profile' })}
                   className="w-full flex items-center justify-center gap-2 px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -103,6 +150,79 @@ export default function ProfilePage() {
                   Continue with Google
                 </button>
               </div>
+
+              <div className="mt-6 text-center">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-300"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Toggle between Sign In and Create Account */}
+              <div className="mt-6 flex justify-center space-x-4">
+                <button
+                  onClick={() => setIsSignIn(true)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                    isSignIn
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  onClick={() => setIsSignIn(false)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                    !isSignIn
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  Create Account
+                </button>
+              </div>
+              
+              <form onSubmit={handleEmailSubmit} className="mt-6 space-y-4">
+                {error && (
+                  <div className="text-red-500 text-sm text-center">
+                    {error}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full mt-6 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  {isSignIn ? 'Sign In' : 'Create Account'}
+                </button>
+              </form>
             </div>
           )}
         </div>

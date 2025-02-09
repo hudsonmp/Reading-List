@@ -1,7 +1,8 @@
 import NextAuth, { AuthOptions, DefaultSession } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
-import { FirestoreAdapter } from '@next-auth/firebase-adapter';
-import { adminDb } from '../../../lib/firebase-admin';
+import CredentialsProvider from 'next-auth/providers/credentials';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../../../lib/firebase';
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -24,15 +25,51 @@ export const authOptions: AuthOptions = {
         }
       }
     }),
+    CredentialsProvider({
+      name: 'Email',
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error('Missing credentials');
+        }
+
+        try {
+          const userCredential = await signInWithEmailAndPassword(
+            auth,
+            credentials.email,
+            credentials.password
+          );
+
+          const user = userCredential.user;
+          return {
+            id: user.uid,
+            email: user.email,
+            name: user.displayName,
+            image: user.photoURL
+          };
+        } catch (error) {
+          console.error('Auth error:', error);
+          return null;
+        }
+      }
+    }),
   ],
-  adapter: FirestoreAdapter(adminDb),
   session: {
-    strategy: "jwt" as const
+    strategy: "jwt"
   },
   callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+      }
+      return token;
+    },
     async session({ session, token }) {
       if (session?.user) {
-        session.user.id = token.sub;
+        session.user.id = token.id as string;
       }
       return session;
     }
@@ -40,6 +77,7 @@ export const authOptions: AuthOptions = {
   pages: {
     signIn: '/profile',
   },
+  debug: process.env.NODE_ENV === 'development',
   secret: process.env.NEXTAUTH_SECRET,
 };
 
