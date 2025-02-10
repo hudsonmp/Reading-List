@@ -70,7 +70,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Set loading to false after a shorter timeout
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 2000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const signInWithGoogle = async () => {
@@ -106,10 +114,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error signing in with email:', authError);
       
       let errorMessage = 'An error occurred during sign in';
-      if (authError.code === 'auth/user-not-found' || authError.code === 'auth/wrong-password') {
-        errorMessage = 'Invalid email or password';
+      if (authError.code === 'auth/user-not-found') {
+        errorMessage = 'No account found with this email. Please check your email or sign up.';
+      } else if (authError.code === 'auth/wrong-password') {
+        errorMessage = 'Incorrect password. Please try again or reset your password.';
       } else if (authError.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many failed attempts. Please try again later.';
+        errorMessage = 'Too many failed attempts. Please try again in a few minutes.';
+      } else if (authError.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.';
       }
       
       setError(errorMessage);
@@ -120,6 +132,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUpWithEmail = async (email: string, password: string, displayName: string) => {
     try {
       setError(null);
+      if (password.length < 6) {
+        setError('Password must be at least 6 characters long');
+        throw new Error('Password too short');
+      }
+      
       const result = await createUserWithEmailAndPassword(auth, email, password);
       
       // Create user profile in Firestore
@@ -145,9 +162,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       let errorMessage = 'An error occurred during sign up';
       if (authError.code === 'auth/email-already-in-use') {
-        errorMessage = 'This email is already registered';
+        errorMessage = 'This email is already registered. Please sign in or use a different email.';
+      } else if (authError.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.';
       } else if (authError.code === 'auth/weak-password') {
-        errorMessage = 'Password should be at least 6 characters';
+        errorMessage = 'Password is too weak. Please use at least 6 characters with a mix of letters and numbers.';
       }
       
       setError(errorMessage);

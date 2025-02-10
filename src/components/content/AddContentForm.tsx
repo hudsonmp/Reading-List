@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/components/auth/AuthContext';
@@ -23,6 +23,17 @@ export const AddContentForm: React.FC = () => {
   });
   const [tagInput, setTagInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const resetForm = () => {
+    setFormData({
+      title: '',
+      url: '',
+      type: 'article',
+      tags: [],
+    });
+    setTagInput('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,14 +48,12 @@ export const AddContentForm: React.FC = () => {
         dateAdded: new Date().toISOString(),
       });
 
+      // Show success message
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+      
       // Reset form
-      setFormData({
-        title: '',
-        url: '',
-        type: 'article',
-        tags: [],
-      });
-      setTagInput('');
+      resetForm();
     } catch (error) {
       console.error('Error adding content:', error);
     } finally {
@@ -76,8 +85,21 @@ export const AddContentForm: React.FC = () => {
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white rounded-lg shadow-lg p-6"
+      className="bg-white rounded-lg shadow-lg p-6 relative"
     >
+      <AnimatePresence>
+        {showSuccess && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-4 right-4 bg-green-100 text-green-800 px-4 py-2 rounded-lg"
+          >
+            Added successfully!
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <h2 className="text-2xl font-bold text-gray-900 mb-6">Add New Content</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
