@@ -1,20 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ReadingItem } from './firebase-service';
-import { getSecrets } from './secrets-manager';
 
 let anthropicClient: Anthropic | null = null;
 
 async function getAnthropicClient(): Promise<Anthropic | null> {
   if (anthropicClient) return anthropicClient;
 
-  const secrets = await getSecrets();
-  if (!secrets?.anthropicApiKey) {
-    console.error('Anthropic API key not found in secrets');
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    console.error('Anthropic API key not found in environment variables');
     return null;
   }
 
   anthropicClient = new Anthropic({
-    apiKey: secrets.anthropicApiKey,
+    apiKey: anthropicApiKey,
     dangerouslyAllowBrowser: true
   });
 
@@ -42,13 +41,20 @@ async function validateUrl(url: string): Promise<boolean> {
 // Helper function to search for related content using Google Custom Search API
 async function searchRelatedContent(
   query: string, 
-  type: 'article' | 'video' = 'article',
-  secrets: { googleApiKey: string; googleSearchEngineId: string }
+  type: 'article' | 'video' = 'article'
 ): Promise<any[]> {
   try {
+    const googleApiKey = process.env.GOOGLE_API_KEY;
+    const googleSearchEngineId = process.env.GOOGLE_SEARCH_ENGINE_ID;
+
+    if (!googleApiKey || !googleSearchEngineId) {
+      console.warn('Google API credentials not found in environment variables');
+      return [];
+    }
+
     const searchType = type === 'video' ? '&videoSyndicated=true&type=video' : '';
     const response = await fetch(
-      `https://www.googleapis.com/customsearch/v1?key=${secrets.googleApiKey}&cx=${secrets.googleSearchEngineId}${searchType}&q=${encodeURIComponent(query)}`
+      `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${googleSearchEngineId}${searchType}&q=${encodeURIComponent(query)}`
     );
     const data = await response.json();
     return data.items || [];
@@ -122,25 +128,9 @@ Content to analyze: ${content}`
 
     const aiResult = JSON.parse(messageContent);
 
-    // Get secrets for Google API
-    const secrets = await getSecrets();
-    if (!secrets?.googleApiKey || !secrets?.googleSearchEngineId) {
-      console.warn('Google API credentials not found in secrets');
-      return {
-        description: aiResult.description,
-        summary: aiResult.summary,
-        suggestedReadings: [],
-        relatedVideos: [],
-        aiAnalysis: {
-          ...aiResult.aiAnalysis,
-          lastAnalyzed: new Date().toISOString(),
-        },
-      };
-    }
-
-    // Next, search for related content using secrets
-    const searchResults = await searchRelatedContent(title, 'article', secrets);
-    const videoResults = await searchRelatedContent(title, 'video', secrets);
+    // Get related content
+    const searchResults = await searchRelatedContent(title, 'article');
+    const videoResults = await searchRelatedContent(title, 'video');
 
     // Format suggested readings from search results
     const suggestedReadings = searchResults.slice(0, 3).map(item => ({
@@ -199,9 +189,14 @@ export async function generateSuggestions(items: ReadingItem[]) {
   try {
     // Extract key information from existing items
     const topics = items.flatMap(item => item.aiAnalysis?.tags || []);
-    const topicSummary = [...new Set(topics)].join(', ');
+    const topicSummary = Array.from(new Set(topics)).join(', ');
 
-    const message = await anthropic.messages.create({
+    const anthropicClient = await getAnthropicClient();
+    if (!anthropicClient) {
+      throw new Error('Failed to initialize Anthropic client');
+    }
+
+    const message = await anthropicClient.messages.create({
       model: "claude-3-haiku-20240307",
       max_tokens: 1000,
       temperature: 0.7,
