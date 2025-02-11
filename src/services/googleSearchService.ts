@@ -43,24 +43,24 @@ export const findRelatedContent = async (
   keywords: string,
   type: 'book' | 'video' | 'article' | 'academic' = 'article'
 ): Promise<SearchResult[]> => {
-  if (!process.env.NEXT_PUBLIC_GOOGLE_API_KEY || !process.env.NEXT_PUBLIC_SEARCH_ENGINE_ID) {
-    throw new Error('Google Search API configuration is missing');
-  }
-
   try {
     const { query, params } = buildSearchQuery(keywords, type);
-    const response = await fetch(
-      `https://www.googleapis.com/customsearch/v1?key=${
-        process.env.NEXT_PUBLIC_GOOGLE_API_KEY
-      }&cx=${
-        process.env.NEXT_PUBLIC_SEARCH_ENGINE_ID
-      }&q=${encodeURIComponent(query)}${params}&num=5`
-    );
+    const response = await fetch('/api/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query,
+        params,
+        type
+      })
+    });
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('Google Search API error:', errorData);
-      throw new Error(errorData.error?.message || 'Failed to fetch related content');
+      console.error('Search API error:', errorData);
+      throw new Error(errorData.message || 'Failed to fetch related content');
     }
 
     const data = await response.json();

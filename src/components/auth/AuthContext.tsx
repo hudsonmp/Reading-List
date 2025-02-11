@@ -12,6 +12,7 @@ import {
 } from 'firebase/auth';
 import { auth, db, googleProvider } from '@/lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
 
 interface AuthContextType {
   user: User | null;
@@ -39,16 +40,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  // Handle navigation before auth state changes
+  const handleSuccessfulAuth = () => {
+    setLoading(false);
+    router.push('/');
+    router.refresh();
+  };
 
   useEffect(() => {
+    let mounted = true;
+
+    // Check for existing auth state immediately
+    const currentUser = auth.currentUser;
+    if (currentUser && mounted) {
+      setUser(currentUser);
+      setLoading(false);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!mounted) return;
+
       if (user) {
+        setUser(user);
+        // Create user document in Firestore only if it doesn't exist
         try {
           const userRef = doc(db, 'users', user.uid);
           const userSnap = await getDoc(userRef);
           
           if (!userSnap.exists()) {
-            await setDoc(userRef, {
+            setDoc(userRef, {
               email: user.email,
               displayName: user.displayName,
               photoURL: user.photoURL,
@@ -60,33 +82,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 level: 1,
                 xp: 0,
               },
-            });
+            }).catch(console.error);
           }
         } catch (error) {
           console.error('Error setting up user:', error);
         }
+      } else {
+        setUser(null);
       }
-      setUser(user);
+      
       setLoading(false);
     });
 
-    // Set loading to false after a shorter timeout
-    const timeout = setTimeout(() => {
-      setLoading(false);
-    }, 2000);
-
     return () => {
+      mounted = false;
       unsubscribe();
-      clearTimeout(timeout);
     };
   }, []);
 
   const signInWithGoogle = async () => {
     try {
       setError(null);
-      const result = await signInWithPopup(auth, googleProvider);
-      return result;
+      setLoading(true);
+      await signInWithPopup(auth, googleProvider);
+      handleSuccessfulAuth();
     } catch (error) {
+      setLoading(false);
       const authError = error as AuthError;
       console.error('Error signing in with Google:', authError);
       
@@ -107,9 +128,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithEmail = async (email: string, password: string) => {
     try {
       setError(null);
-      const result = await signInWithEmailAndPassword(auth, email, password);
-      return result;
+      setLoading(true);
+      await signInWithEmailAndPassword(auth, email, password);
+      handleSuccessfulAuth();
     } catch (error) {
+      setLoading(false);
       const authError = error as AuthError;
       console.error('Error signing in with email:', authError);
       
@@ -132,6 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUpWithEmail = async (email: string, password: string, displayName: string) => {
     try {
       setError(null);
+      setLoading(true);
       if (password.length < 6) {
         setError('Password must be at least 6 characters long');
         throw new Error('Password too short');
@@ -155,8 +179,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         },
       });
       
-      return result;
+      handleSuccessfulAuth();
     } catch (error) {
+      setLoading(false);
       const authError = error as AuthError;
       console.error('Error signing up with email:', authError);
       
@@ -177,8 +202,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       setError(null);
+      setLoading(true);
       await signOut(auth);
+      router.push('/');
     } catch (error) {
+      setLoading(false);
       console.error('Error signing out:', error);
       setError('Error signing out');
       throw error;
